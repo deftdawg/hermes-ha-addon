@@ -77,10 +77,12 @@ nginx
 echo "[run] Loading page active (ingress: $INGRESS_PORT)"
 
 # Create persistent directories (only system infra — Hermes creates its own)
+SIGNAL_DATA_DIR="$HOME/.local/share/signal-cli"
 for d in "$HERMES_HOME" \
          "$NODE_DIR/lib" \
          "$GO_DIR/bin" \
-         "$CERTS_DIR"; do
+         "$CERTS_DIR" \
+         "$SIGNAL_DATA_DIR"; do
     mkdir -p "$d"
 done
 
@@ -510,6 +512,7 @@ echo "[run] Nginx configured (ingress: $INGRESS_PORT, HTTP: $HTTP_PORT, HTTPS: $
 GATEWAY_PID=""
 TTYD_TERMINAL_PID=""
 TTYD_HERMES_PID=""
+SIGNAL_CLI_PID=""
 
 start_gateway() {
     echo "[run] Starting Hermes gateway..."
@@ -554,6 +557,38 @@ WRAPPER
     echo "[run] ttyd started (hermes PID: $TTYD_HERMES_PID, terminal PID: $TTYD_TERMINAL_PID)"
 }
 
+start_signal_cli() {
+    # signal-cli daemon only starts when Signal is configured in Hermes
+    # Requires SIGNAL_ACCOUNT in .env and a linked account in the data dir
+    SIGNAL_ACCOUNT=""
+    SIGNAL_HTTP_PORT="8080"
+    SIGNAL_DATA_DIR="$HOME/.local/share/signal-cli"
+    if [ -f "$HERMES_HOME/.env" ]; then
+        SIGNAL_ACCOUNT=$(grep -oP '^SIGNAL_ACCOUNT=\K.*' "$HERMES_HOME/.env" 2>/dev/null || true)
+        SIGNAL_HTTP_URL=$(grep -oP '^SIGNAL_HTTP_URL=\K.*' "$HERMES_HOME/.env" 2>/dev/null || true)
+        if [ -n "$SIGNAL_HTTP_URL" ]; then
+            SIGNAL_HTTP_PORT=$(echo "$SIGNAL_HTTP_URL" | grep -oP ':\K[0-9]+$' || echo "8080")
+        fi
+    fi
+    if [ -z "$SIGNAL_ACCOUNT" ]; then
+        echo "[run] signal-cli: skipped (SIGNAL_ACCOUNT not set in .env)"
+        return
+    fi
+    if [ ! -d "$SIGNAL_DATA_DIR/data" ]; then
+        echo "[run] signal-cli: skipped (no linked account in $SIGNAL_DATA_DIR)"
+        return
+    fi
+    echo "[run] Starting signal-cli daemon (account: ${SIGNAL_ACCOUNT}, port: ${SIGNAL_HTTP_PORT})..."
+    mkdir -p "$HERMES_HOME/logs"
+    signal-cli \
+        --config "$SIGNAL_DATA_DIR" \
+        --account "$SIGNAL_ACCOUNT" \
+        daemon --http "127.0.0.1:${SIGNAL_HTTP_PORT}" \
+        >> "$HERMES_HOME/logs/signal-cli.log" 2>&1 &
+    SIGNAL_CLI_PID=$!
+    echo "[run] signal-cli started (PID: $SIGNAL_CLI_PID)"
+}
+
 reload_nginx() {
     echo "[run] Reloading nginx with full config..."
     nginx -s reload
@@ -563,6 +598,7 @@ reload_nginx() {
 # Register signal handler BEFORE starting services
 trap shutdown SIGTERM SIGINT
 
+start_signal_cli
 start_gateway
 start_ttyd
 reload_nginx
@@ -600,6 +636,11 @@ shutdown() {
         fi
     done
     echo "[run] ttyd stopped"
+    if [ -n "$SIGNAL_CLI_PID" ] && kill -0 "$SIGNAL_CLI_PID" 2>/dev/null; then
+        kill "$SIGNAL_CLI_PID" 2>/dev/null
+        wait "$SIGNAL_CLI_PID" 2>/dev/null || true
+        echo "[run] signal-cli stopped"
+    fi
     if [ -n "$GATEWAY_PID" ] && kill -0 "$GATEWAY_PID" 2>/dev/null; then
         kill -TERM "$GATEWAY_PID" 2>/dev/null
         local waited=0
