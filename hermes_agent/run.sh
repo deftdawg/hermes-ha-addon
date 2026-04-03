@@ -358,9 +358,16 @@ if [ -f "$HERMES_HOME/.env" ]; then
     done
 fi
 
-# HA integration: pass through if set
+# HA integration: pass through if set, and sync to .env so Hermes' dotenv picks them up
 if [ -n "$HASS_TOKEN" ]; then
     export HASS_TOKEN
+    if [ -f "$HERMES_HOME/.env" ]; then
+        if grep -q "^HASS_TOKEN=" "$HERMES_HOME/.env"; then
+            sed -i "s|^HASS_TOKEN=.*|HASS_TOKEN=${HASS_TOKEN}|" "$HERMES_HOME/.env"
+        else
+            echo "HASS_TOKEN=${HASS_TOKEN}" >> "$HERMES_HOME/.env"
+        fi
+    fi
     echo "[run] HASS_TOKEN injected"
 fi
 # Git token also serves as GITHUB_TOKEN (for gh CLI + Hermes skills)
@@ -370,6 +377,13 @@ if [ -n "$GIT_TOKEN" ]; then
 fi
 if [ -n "$HASS_URL" ]; then
     export HASS_URL
+    if [ -f "$HERMES_HOME/.env" ]; then
+        if grep -q "^HASS_URL=" "$HERMES_HOME/.env"; then
+            sed -i "s|^HASS_URL=.*|HASS_URL=${HASS_URL}|" "$HERMES_HOME/.env"
+        else
+            echo "HASS_URL=${HASS_URL}" >> "$HERMES_HOME/.env"
+        fi
+    fi
     echo "[run] HASS_URL: $HASS_URL"
 fi
 
