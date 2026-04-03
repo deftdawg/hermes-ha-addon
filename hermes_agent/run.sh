@@ -560,30 +560,30 @@ WRAPPER
 start_signal_cli() {
     # signal-cli daemon only starts when Signal is configured in Hermes
     # Requires SIGNAL_ACCOUNT in .env and a linked account in the data dir
-    SIGNAL_ACCOUNT=""
-    SIGNAL_HTTP_PORT="8080"
-    SIGNAL_DATA_DIR="$HOME/.local/share/signal-cli"
+    local acct="" http_port="8080" http_url="" data_dir="$HOME/.local/share/signal-cli"
     if [ -f "$HERMES_HOME/.env" ]; then
-        SIGNAL_ACCOUNT=$(grep -oP '^SIGNAL_ACCOUNT=\K.*' "$HERMES_HOME/.env" 2>/dev/null || true)
-        SIGNAL_HTTP_URL=$(grep -oP '^SIGNAL_HTTP_URL=\K.*' "$HERMES_HOME/.env" 2>/dev/null || true)
-        if [ -n "$SIGNAL_HTTP_URL" ]; then
-            SIGNAL_HTTP_PORT=$(echo "$SIGNAL_HTTP_URL" | grep -oP ':\K[0-9]+$' || echo "8080")
+        acct=$(sed -n 's/^SIGNAL_ACCOUNT=//p' "$HERMES_HOME/.env" | head -1) || true
+        http_url=$(sed -n 's/^SIGNAL_HTTP_URL=//p' "$HERMES_HOME/.env" | head -1) || true
+        if [ -n "$http_url" ]; then
+            http_port="${http_url##*:}"
+            # Fallback if no port in URL
+            case "$http_port" in ''|*[!0-9]*) http_port="8080" ;; esac
         fi
     fi
-    if [ -z "$SIGNAL_ACCOUNT" ]; then
+    if [ -z "$acct" ]; then
         echo "[run] signal-cli: skipped (SIGNAL_ACCOUNT not set in .env)"
-        return
+        return 0
     fi
-    if [ ! -d "$SIGNAL_DATA_DIR/data" ]; then
-        echo "[run] signal-cli: skipped (no linked account in $SIGNAL_DATA_DIR)"
-        return
+    if [ ! -d "$data_dir/data" ]; then
+        echo "[run] signal-cli: skipped (no linked account in $data_dir)"
+        return 0
     fi
-    echo "[run] Starting signal-cli daemon (account: ${SIGNAL_ACCOUNT}, port: ${SIGNAL_HTTP_PORT})..."
+    echo "[run] Starting signal-cli daemon (account: ${acct}, port: ${http_port})..."
     mkdir -p "$HERMES_HOME/logs"
     signal-cli \
-        --config "$SIGNAL_DATA_DIR" \
-        --account "$SIGNAL_ACCOUNT" \
-        daemon --http "127.0.0.1:${SIGNAL_HTTP_PORT}" \
+        --config "$data_dir" \
+        --account "$acct" \
+        daemon --http "127.0.0.1:${http_port}" \
         >> "$HERMES_HOME/logs/signal-cli.log" 2>&1 &
     SIGNAL_CLI_PID=$!
     echo "[run] signal-cli started (PID: $SIGNAL_CLI_PID)"
