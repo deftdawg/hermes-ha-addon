@@ -321,12 +321,18 @@ fi
 
 # ── Section 7: Environment variable passthrough ──────────────────────
 # Source .env first (base config from hermes setup)
+# Save addon-provided values so .env can't clobber them
+_SAVE_HASS_TOKEN="$HASS_TOKEN"
+_SAVE_HASS_URL="$HASS_URL"
 if [ -f "$HERMES_HOME/.env" ]; then
     set -a
     # shellcheck disable=SC1091
     source "$HERMES_HOME/.env"
     set +a
 fi
+# Restore addon-provided values (take precedence over .env)
+HASS_TOKEN="${_SAVE_HASS_TOKEN:-$HASS_TOKEN}"
+HASS_URL="${_SAVE_HASS_URL:-$HASS_URL}"
 
 # Write HA addon config env_vars to .env (non-empty values only)
 # Hermes reads .env via dotenv (override=True), so this is the canonical path
