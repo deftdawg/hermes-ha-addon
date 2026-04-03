@@ -1,4 +1,33 @@
 ARG BUILD_FROM
+
+# ── Signal-CLI build stage ───────────────────────────────────────────
+FROM eclipse-temurin:25-jre AS java-runtime
+FROM eclipse-temurin:25-jdk AS signal-cli-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends git zip curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /signal-cli
+RUN git clone --depth 1 https://github.com/AsamK/signal-cli.git .
+RUN ./gradlew installDist
+
+# Patch libsignal-client jar with native library for current architecture
+# Native libs from: https://github.com/exquo/signal-libs-build
+ARG TARGETARCH
+RUN LIBSIGNAL_VERSION=$(ls build/install/signal-cli/lib/libsignal-client-*.jar \
+        | grep -oP '\d+\.\d+\.\d+') \
+    && echo "Detected libsignal-client version: ${LIBSIGNAL_VERSION}" \
+    && if [ "${TARGETARCH}" = "arm64" ]; then \
+        echo "Downloading aarch64 native library from exquo/signal-libs-build..." \
+        && curl -fsSL "https://github.com/exquo/signal-libs-build/releases/download/libsignal_v${LIBSIGNAL_VERSION}/libsignal_jni.so-v${LIBSIGNAL_VERSION}-aarch64-unknown-linux-gnu.tar.gz" \
+            -o /tmp/libsignal.tar.gz \
+        && tar -xzf /tmp/libsignal.tar.gz -C /tmp \
+        && zip -uj "build/install/signal-cli/lib/libsignal-client-${LIBSIGNAL_VERSION}.jar" \
+            /tmp/libsignal_jni.so \
+        && rm /tmp/libsignal.tar.gz /tmp/libsignal_jni.so; \
+    fi
+
+# ── Main stage ───────────────────────────────────────────────────────
 FROM ${BUILD_FROM}
 
 # ── System packages ──────────────────────────────────────────────────
@@ -74,6 +103,12 @@ RUN useradd -r -m -s /bin/bash -d /home/linuxbrew linuxbrew \
 RUN su - linuxbrew -c \
     'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' \
     && /home/linuxbrew/.linuxbrew/bin/brew --version
+
+# ── Signal-CLI runtime ───────────────────────────────────────────────
+COPY --from=java-runtime /opt/java/openjdk /opt/java
+COPY --from=signal-cli-builder /signal-cli/build/install/signal-cli /opt/signal-cli
+ENV JAVA_HOME="/opt/java" \
+    PATH="/opt/signal-cli/bin:/opt/java/bin:${PATH}"
 
 # ── Addon files ──────────────────────────────────────────────────────
 COPY run.sh /
